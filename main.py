@@ -6,6 +6,12 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, Messa
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext.filters import TEXT
 
+from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import Session
+
+from database.models import Base, User
+from database.commands import create_new_user, add_waste, get_user
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -36,17 +42,15 @@ kinds = [
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="привет бро! это трекер расходов.\nты можешь здесь отслеживать свои расходы и смотреть статистику.\nвведи команду /waste, чтобы добавить расходы и команду /stats, чтобы посмотреть статистику!")
-    context.user_data["statistics"] = {}
-
-
-async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=update.message.text)
-
+    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                   text="привет бро! это трекер расходов.\nты можешь здесь отслеживать свои расходы и смотреть статистику.\nвведи команду /waste, чтобы добавить расходы и команду /stats, чтобы посмотреть статистику!")
+    with Session(engine) as session:
+        create_new_user(session=session, username=update.effective_user.username)
+    
 
 async def waste_money(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Йоу, сколько ты потратил?")
-
+    
 
 async def get_money(update: Update, context: ContextTypes.DEFAULT_TYPE):
     money = update.effective_message.text
@@ -60,32 +64,40 @@ async def get_money(update: Update, context: ContextTypes.DEFAULT_TYPE):
     markup = InlineKeyboardMarkup(kinds)
     
     await update.effective_message.reply_text(text="Понял, а на что ты их потратил?",
-                                              reply_markup=markup,)
+                                              reply_markup=markup, )
 
 
 async def save_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
-    category = update.callback_query.data
-    statistics = context.user_data["statistics"]
-    money = context.user_data["money"]
-    if category in statistics:
-        statistics[category] += money
-    else:
-        statistics[category] = money
-    context.user_data["money"] = 0
     await update.effective_message.reply_text("Запомнил!")
-    
-    
+    category = update.callback_query.data
+    money = context.user_data["money"]
+    with Session(engine) as session:
+        add_waste(session=session,
+                  username=update.effective_user.username,
+                  category=category,
+                  amount=money)
+    context.user_data["money"] = 0
+
+
 async def statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply = ''
-    stats: dict = context.user_data["statistics"]
+    with Session(engine) as session:
+        stats: dict = get_user(session=session, username=update.effective_user.username).__dict__
+        # logging.log(logging.INFO, stats)
+        del stats["username"]
+        del stats["_sa_instance_state"]
     stats_sum = sum(stats.values())
     for kind, sum_money in stats.items():
-        reply += f'{kind}: {sum_money} рублей, это {sum_money/stats_sum*100:.2f}%\n'
+        reply += f'{kind}: {sum_money} рублей, это {sum_money / stats_sum * 100:.2f}%\n'
     await update.effective_message.reply_text(reply)
-    
+
 
 if __name__ == '__main__':
+    engine = create_engine("sqlite:///database/money.db", echo=True)  # создание движка бд
+    if not inspect(engine).has_table(User.__tablename__):
+        Base.metadata.create_all(engine)  # создание всех таблиц
+    
     TOKEN = os.environ.get("TOKEN")
     
     application = ApplicationBuilder().token(TOKEN).build()

@@ -10,20 +10,5 @@ services:
     command: sh -c "python main.py"
     env_file:
       - .env
-#    depends_on:
-#      - db
-#  db:
-#    image: postgres:15
-#    container_name: mkd_database
-#    restart: unless-stopped
-#    volumes:
-#      - postgres_data:/var/lib/postgresql/data/
-#      - /etc/localtime:/etc/localtime:ro
-#      - /etc/timezone:/etc/timezone:ro
-#    ports:
-#      - "5430:5432"
-#    env_file:
-#      - .env
-
-#volumes:
-#  postgres_data:
+    volumes:
+      - "./database/money.db:/bot/database/money.db"
